@@ -1,70 +1,96 @@
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+# tests/test_auth.py
+
+import pytest
+import pytest_asyncio
+from httpx import AsyncClient
+from backend.main import app
+from backend.database.config import SessionLocal, Base, engine
+from backend.modelos.user import User
+from backend.modelos.portfolio import Portfolio
+from backend.modelos.transaction import Transaction
 from passlib.context import CryptContext
-from jose import JWTError, jwt
-from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
-from database.config import SessionLocal
-from modelos.user import User
 
-# Configuración
-SECRET_KEY = "2003jaime"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+# Ignorar advertencias de deprecación temporalmente (Opcional)
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-# Configuración de seguridad
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# Instancia de OAuth2
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
-
-def get_db():
+# Fixture para configurar la base de datos de pruebas
+@pytest_asyncio.fixture(scope="module")
+async def setup_db_auth():
+    # Crear las tablas
+    Base.metadata.create_all(bind=engine)
     db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    
+    # Crear un usuario de prueba único
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    hashed_password = pwd_context.hash("123456")
+    test_user = User(
+        username="testuser_auth", 
+        email="test_auth@example.com", 
+        password=hashed_password, 
+        balance=10000.0
+    )
+    db.add(test_user)
+    db.commit()
+    db.refresh(test_user)
+    
+    # Crear portafolio para el usuario
+    test_portfolio = Portfolio(
+        user_id=test_user.id, 
+        btc_amount=0.0, 
+        current_value=0.0
+    )
+    db.add(test_portfolio)
+    db.commit()
+    
+    yield {"user": test_user, "portfolio": test_portfolio}
+    
+    # Limpiar la base de datos después de las pruebas
+    db.query(Transaction).delete()
+    db.query(Portfolio).delete()
+    db.query(User).delete()
+    db.commit()
+    db.close()
+    Base.metadata.drop_all(bind=engine)
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+# Fixture para el cliente de pruebas (asíncrono)
+@pytest_asyncio.fixture
+async def async_client_fixture_auth(setup_db_auth):
+    async with AsyncClient(app=app, base_url="http://testserver") as ac:
+        yield ac
 
-def get_password_hash(password):
-    return pwd_context.hash(password)
+@pytest.mark.asyncio
+async def test_login_success(async_client_fixture_auth, setup_db_auth):
+    user = setup_db_auth["user"]
+    response = await async_client_fixture_auth.post(
+        "/auth/token",
+        data={"username": user.email, "password": "123456"}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "access_token" in data
+    assert data["token_type"] == "bearer"
 
-def authenticate_user(email: str, password: str, db: Session):
-    user = db.query(User).filter(User.email == email).first()
-    if not user or not verify_password(password, user.password):
-        return None
-    return user
+@pytest.mark.asyncio
+async def test_login_invalid_credentials(async_client_fixture_auth):
+    response = await async_client_fixture_auth.post(
+        "/auth/token",
+        data={"username": "fake@example.com", "password": "wrong"}
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Correo o contraseña incorrectos"
 
-def create_access_token(data: dict, expires_delta: timedelta | None = None):
-    to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+@pytest.mark.asyncio
+async def test_protected_route_no_token(async_client_fixture_auth):
+    response = await async_client_fixture_auth.get("/users/me")
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Not authenticated"
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="No se pudo validar el token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        user = db.query(User).filter(User.email == email).first()
-        if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Usuario no encontrado",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        return user
-    except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token inválido",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+@pytest.mark.asyncio
+async def test_protected_route_invalid_token(async_client_fixture_auth):
+    response = await async_client_fixture_auth.get(
+        "/users/me",
+        headers={"Authorization": "Bearer invalid_token"}
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Token inválido"
