@@ -1,18 +1,19 @@
+# backend/database/config.py
+
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 
-DATABASE_URL = "sqlite:///./bbdd_crypto.db"
+DATABASE_URL = "sqlite:///./test.db"  # Cambia esto según tu base de datos
 
-# Crear el motor de la base de datos
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-
-# Crear una sesión de la base de datos
+engine = create_engine(
+    DATABASE_URL, connect_args={"check_same_thread": False}  # Solo para SQLite
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Declarar la base para los modelos
 Base = declarative_base()
 
-# Función para obtener la sesión de la base de datos
+# Dependencia para obtener la sesión de la base de datos
 def get_db():
     db = SessionLocal()
     try:
