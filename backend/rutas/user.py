@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from database.config import SessionLocal
-from modelos.user import User
-from modelos.transaction import Transaction
+from backend.database.config import SessionLocal  # Importación absoluta
+from backend.modelos.user import User  # Importación absoluta
+from backend.modelos.transaction import Transaction  # Importación absoluta
 from passlib.context import CryptContext
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
+from typing import Literal
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -22,9 +23,9 @@ def get_db():
 
 # Esquemas para usuarios y transacciones
 class UserCreate(BaseModel):
-    username: str
+    username: str = Field(..., min_length=3, max_length=50)
     email: str
-    password: str
+    password: str = Field(..., min_length=6)
 
 
 class UserLogin(BaseModel):
@@ -32,10 +33,16 @@ class UserLogin(BaseModel):
     password: str
 
 
+class TransactionCreate(BaseModel):
+    type: Literal["buy", "sell"]
+    amount: float = Field(..., gt=0, description="Cantidad de Bitcoin")
+    price: float = Field(..., gt=0, description="Precio actual de Bitcoin")
+
+
 # Rutas
 
 # Registrar usuario
-@router.post("/register")
+@router.post("/register", response_model=dict)
 def register_user(user: UserCreate, db: Session = Depends(get_db)):
     # Verificar si el usuario ya existe
     existing_user = db.query(User).filter(User.email == user.email).first()
@@ -59,7 +66,7 @@ def register_user(user: UserCreate, db: Session = Depends(get_db)):
 
 
 # Iniciar sesión
-@router.post("/login")
+@router.post("/login", response_model=dict)
 def login(user: UserLogin, db: Session = Depends(get_db)):
     # Buscar usuario por email
     db_user = db.query(User).filter(User.email == user.email).first()
@@ -69,7 +76,7 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
 
 
 # Consultar balance
-@router.get("/{user_id}/balance")
+@router.get("/{user_id}/balance", response_model=dict)
 def get_balance(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -78,27 +85,27 @@ def get_balance(user_id: int, db: Session = Depends(get_db)):
 
 
 # Realizar transacción (compra/venta)
-@router.post("/{user_id}/transaction")
-def make_transaction(user_id: int, transaction: dict, db: Session = Depends(get_db)):
+@router.post("/{user_id}/transaction", response_model=dict)
+def make_transaction(user_id: int, transaction: TransactionCreate, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
     # Validar datos de la transacción
-    transaction_type = transaction.get("type")  # "buy" o "sell"
-    amount = transaction.get("amount")         # Cantidad de Bitcoin
-    price = transaction.get("price")           # Precio actual de Bitcoin
-
-    if transaction_type not in ["buy", "sell"]:
-        raise HTTPException(status_code=400, detail="Transacción inválida")
+    transaction_type = transaction.type  # "buy" o "sell"
+    amount = transaction.amount         # Cantidad de Bitcoin
+    price = transaction.price           # Precio actual de Bitcoin
 
     total_cost = amount * price
 
     # Validar balance o cantidad
     if transaction_type == "buy" and user.balance < total_cost:
         raise HTTPException(status_code=400, detail="Fondos insuficientes")
-    elif transaction_type == "sell" and amount > 0:  # Nota: Aún no rastreamos Bitcoin
-        raise HTTPException(status_code=400, detail="No tienes suficientes Bitcoin para vender")
+    elif transaction_type == "sell":
+        # Nota: Aún no rastreamos Bitcoin, esta es una validación básica
+        # En una implementación completa, deberías rastrear las tenencias de Bitcoin del usuario
+        # Por ahora, asumimos que el usuario puede vender cualquier cantidad
+        pass  # Aquí puedes agregar lógica adicional si rastreas Bitcoin
 
     # Actualizar balance y registrar transacción
     if transaction_type == "buy":

@@ -1,6 +1,9 @@
 from fastapi import FastAPI
-from database.config import engine, Base
-from rutas import user
+from backend.database.config import engine, Base  # Importación absoluta
+from backend.rutas import user  # Importación absoluta
+
+# Importa los modelos para asegurarte de que las tablas se crean
+from backend.modelos import user as user_model, transaction as transaction_model
 
 app = FastAPI()
 
@@ -16,4 +19,4 @@ def root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run("backend.main:app", host="127.0.0.1", port=8000, reload=True)
