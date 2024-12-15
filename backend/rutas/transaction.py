@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend.database.config import SessionLocal
 from backend.modelos.transaction import Transaction
-from modelos.user import User
+from backend.modelos.user import User
 from pydantic import BaseModel
 from datetime import datetime
 

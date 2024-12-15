@@ -8,7 +8,7 @@ from database.config import SessionLocal
 from modelos.user import User
 
 # Configuración
-SECRET_KEY = "your_secret_key"
+SECRET_KEY = "2003jaime"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
